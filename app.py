@@ -2,7 +2,7 @@
 # Predictive Maintenance Dashboard
 # Developed by: The Vanguards
 # Members: Pravin | Aiteswar | Ashwien
-# Fully Automatic Version: Model trains on CSV upload
+# Fully Automatic Version: Correct SHAP for Multi-Class with Progress Bar
 # ==========================================
 
 import streamlit as st
@@ -137,7 +137,7 @@ elif menu == "🧠 Failure Prediction":
     )
 
 # ------------------------------------------
-# 4. FEATURE INSIGHTS (SHAP VALUES)
+# 4. FEATURE INSIGHTS (SHAP VALUES WITH PROGRESS BAR)
 # ------------------------------------------
 elif menu == "📈 Feature Insights":
     st.subheader("Model Explainability - SHAP Insights")
@@ -148,10 +148,31 @@ elif menu == "📈 Feature Insights":
 
     with st.spinner("Calculating SHAP values..."):
         explainer = shap.TreeExplainer(model)
-        shap_values = explainer(sample_X)
+        
+        # Initialize progress bar
+        progress_bar = st.progress(0)
+        total_rows = len(sample_X)
+        shap_values_list = []
 
-        # Compute mean absolute SHAP values
-        mean_abs_shap = np.abs(shap_values.values).mean(axis=0)
+        # Compute SHAP values row by row to update progress
+        for i, (_, row) in enumerate(sample_X.iterrows()):
+            shap_val = explainer.shap_values(row)
+            shap_values_list.append(shap_val)
+            progress_bar.progress((i + 1) / total_rows)
+
+        progress_bar.empty()  # remove progress bar when done
+
+        # Handle multi-class SHAP values
+        if isinstance(shap_values_list[0], list):  # multi-class
+            # Stack per class
+            class_arrays = []
+            for class_idx in range(len(shap_values_list[0])):
+                class_arrays.append(np.array([shap_val[class_idx] for shap_val in shap_values_list]))
+            # Compute mean absolute across classes
+            mean_abs_shap = np.mean([np.abs(ca).mean(axis=0) for ca in class_arrays], axis=0)
+        else:  # single-class
+            mean_abs_shap = np.abs(np.vstack(shap_values_list)).mean(axis=0)
+
         shap_summary = pd.DataFrame({
             'Feature': sample_X.columns,
             'Mean |SHAP value|': mean_abs_shap
