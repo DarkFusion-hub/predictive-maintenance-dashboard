@@ -61,6 +61,9 @@ else:
     st.sidebar.warning("Please upload a dataset to continue.")
     st.stop()
 
+# ✅ Define sensor columns globally (used in all sections)
+sensor_cols = [c for c in data.columns if c not in ['timestamp', 'status']]
+
 # ------------------------------------------
 # 1. DASHBOARD OVERVIEW
 # ------------------------------------------
@@ -70,7 +73,7 @@ if menu == "🏠 Dashboard Overview":
     with col1:
         st.metric("Total Records", len(data))
     with col2:
-        st.metric("Number of Sensors", len([c for c in data.columns if c not in ['timestamp', 'status']]))
+        st.metric("Number of Sensors", len(sensor_cols))
     with col3:
         st.metric("Time Range", f"{data['timestamp'].min().date()} → {data['timestamp'].max().date()}")
 
@@ -86,13 +89,16 @@ if menu == "🏠 Dashboard Overview":
 # ------------------------------------------
 elif menu == "📊 Sensor Data Visualization":
     st.subheader("Sensor Trend Analysis")
-    sensor_cols = [c for c in data.columns if c not in ['timestamp', 'status']]
-    selected_sensor = st.selectbox("Select Sensor", sensor_cols)
-    fig = px.line(data, x='timestamp', y=selected_sensor, title=f"{selected_sensor} Over Time")
-    st.plotly_chart(fig, use_container_width=True)
 
-    st.markdown("#### Correlation Heatmap")
-    st.write(px.imshow(data[sensor_cols].corr(), color_continuous_scale='Blues'))
+    if sensor_cols:
+        selected_sensor = st.selectbox("Select Sensor", sensor_cols)
+        fig = px.line(data, x='timestamp', y=selected_sensor, title=f"{selected_sensor} Over Time")
+        st.plotly_chart(fig, use_container_width=True)
+
+        st.markdown("#### Correlation Heatmap")
+        st.write(px.imshow(data[sensor_cols].corr(), color_continuous_scale='Blues'))
+    else:
+        st.warning("⚠️ No numeric sensor columns detected.")
 
 # ------------------------------------------
 # 3. FAILURE PREDICTION (ML MODEL)
@@ -100,42 +106,46 @@ elif menu == "📊 Sensor Data Visualization":
 elif menu == "🧠 Failure Prediction":
     st.subheader("Predict Equipment Health Status")
 
-    # Placeholder model — replace with trained ML model
     if 'status' not in data.columns:
         st.error("Training labels ('status') not found in dataset.")
     else:
-        X = data[sensor_cols]
-        y = data['status']
+        if not sensor_cols:
+            st.error("No sensor columns found for prediction.")
+        else:
+            X = data[sensor_cols]
+            y = data['status']
 
-        # Dummy model for demo (replace with actual saved model)
-        model = RandomForestClassifier()
-        model.fit(X, y)
+            # Dummy model for demo (replace with actual trained model)
+            model = RandomForestClassifier(random_state=42)
+            model.fit(X, y)
 
-        predictions = model.predict(X)
-        data['predicted_status'] = predictions
+            predictions = model.predict(X)
+            data['predicted_status'] = predictions
 
-        st.success("✅ Predictions generated successfully!")
+            st.success("✅ Predictions generated successfully!")
 
-        st.markdown("### Failure Probability Overview")
-        fig = px.histogram(data, x='predicted_status', title="Predicted Equipment Status")
-        st.plotly_chart(fig, use_container_width=True)
+            st.markdown("### Failure Probability Overview")
+            fig = px.histogram(data, x='predicted_status', title="Predicted Equipment Status")
+            st.plotly_chart(fig, use_container_width=True)
 
-        st.download_button("Download Prediction Results", data.to_csv(index=False).encode('utf-8'),
-                           "predictions.csv", "text/csv")
+            st.download_button("Download Prediction Results", data.to_csv(index=False).encode('utf-8'),
+                               "predictions.csv", "text/csv")
 
 # ------------------------------------------
 # 4. FEATURE INSIGHTS (SHAP VALUES)
 # ------------------------------------------
 elif menu == "📈 Feature Insights":
     st.subheader("Model Explainability - SHAP Insights")
-
     st.info("This section shows which features (sensors) most influence failure predictions.")
-    with st.spinner("Calculating SHAP values..."):
-        # Example using small subset for speed
-        sample_X = data[sensor_cols].sample(min(200, len(data)))
-        explainer = shap.Explainer(model, sample_X)
-        shap_values = explainer(sample_X)
-        st.pyplot(shap.summary_plot(shap_values, sample_X, show=False))
+
+    if 'model' not in locals():
+        st.warning("⚠️ Please run the 'Failure Prediction' section first to generate a model.")
+    else:
+        with st.spinner("Calculating SHAP values..."):
+            sample_X = data[sensor_cols].sample(min(200, len(data)))
+            explainer = shap.Explainer(model, sample_X)
+            shap_values = explainer(sample_X)
+            st.pyplot(shap.summary_plot(shap_values, sample_X, show=False))
 
 # ------------------------------------------
 # 5. MAINTENANCE LOG
@@ -159,25 +169,30 @@ elif menu == "🛠️ Maintenance Log":
 elif menu == "📉 Model Performance":
     st.subheader("Model Evaluation Metrics")
 
-    y_true = data['status']
-    y_pred = data['predicted_status']
-    st.text("Classification Report:")
-    st.text(classification_report(y_true, y_pred))
+    if 'predicted_status' not in data.columns:
+        st.warning("⚠️ Please run the 'Failure Prediction' section first to generate predictions.")
+        st.stop()
+    else:
+        y_true = data['status']
+        y_pred = data['predicted_status']
 
-    # Confusion matrix
-    cm = confusion_matrix(y_true, y_pred)
-    fig = px.imshow(cm, text_auto=True, title="Confusion Matrix", color_continuous_scale='Blues')
-    st.plotly_chart(fig, use_container_width=True)
+        st.text("Classification Report:")
+        st.text(classification_report(y_true, y_pred))
 
-    # ROC Curve (if binary)
-    if len(set(y_true)) == 2:
-        fpr, tpr, _ = roc_curve(pd.factorize(y_true)[0], pd.factorize(y_pred)[0])
-        roc_auc = auc(fpr, tpr)
-        fig_roc = go.Figure()
-        fig_roc.add_trace(go.Scatter(x=fpr, y=tpr, mode='lines', name='ROC Curve'))
-        fig_roc.add_trace(go.Scatter(x=[0, 1], y=[0, 1], mode='lines', name='Baseline', line=dict(dash='dash')))
-        fig_roc.update_layout(title=f"ROC Curve (AUC = {roc_auc:.2f})", xaxis_title='False Positive Rate', yaxis_title='True Positive Rate')
-        st.plotly_chart(fig_roc, use_container_width=True)
+        cm = confusion_matrix(y_true, y_pred)
+        fig = px.imshow(cm, text_auto=True, title="Confusion Matrix", color_continuous_scale='Blues')
+        st.plotly_chart(fig, use_container_width=True)
+
+        if len(set(y_true)) == 2:
+            fpr, tpr, _ = roc_curve(pd.factorize(y_true)[0], pd.factorize(y_pred)[0])
+            roc_auc = auc(fpr, tpr)
+            fig_roc = go.Figure()
+            fig_roc.add_trace(go.Scatter(x=fpr, y=tpr, mode='lines', name='ROC Curve'))
+            fig_roc.add_trace(go.Scatter(x=[0, 1], y=[0, 1], mode='lines', name='Baseline', line=dict(dash='dash')))
+            fig_roc.update_layout(title=f"ROC Curve (AUC = {roc_auc:.2f})", 
+                                  xaxis_title='False Positive Rate', 
+                                  yaxis_title='True Positive Rate')
+            st.plotly_chart(fig_roc, use_container_width=True)
 
 # ------------------------------------------
 # END
