@@ -157,11 +157,11 @@ elif menu == "📈 Feature Insights":
         st.warning("⚠️ Please run the 'Failure Prediction' section first to generate a model.")
     else:
         model = st.session_state.model
-        le = st.session_state.label_encoder
         sample_X = data[sensor_cols].sample(min(200, len(data)))
 
         with st.spinner("Calculating SHAP values..."):
-            explainer = shap.TreeExplainer(model, model_output="probability")
+            # Use TreeExplainer without model_output
+            explainer = shap.TreeExplainer(model)
             shap_values = explainer(sample_X)
 
             # Render SHAP summary bar plot as HTML
