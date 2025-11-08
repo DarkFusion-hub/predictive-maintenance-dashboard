@@ -10,8 +10,10 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import classification_report, confusion_matrix, roc_curve, auc
 import shap
+import matplotlib.pyplot as plt
 
 # ------------------------------------------
 # PAGE CONFIGURATION
@@ -113,13 +115,23 @@ elif menu == "🧠 Failure Prediction":
             X = data[sensor_cols]
             y = data['status']
 
+            # Encode status labels if not already in session_state
+            if 'label_encoder' not in st.session_state:
+                le = LabelEncoder()
+                y_encoded = le.fit_transform(y)
+                st.session_state.label_encoder = le
+            else:
+                le = st.session_state.label_encoder
+                y_encoded = le.transform(y)
+
             # Train model if not already in session_state
             if 'model' not in st.session_state:
-                st.session_state.model = RandomForestClassifier(random_state=42)
-                st.session_state.model.fit(X, y)
+                model = RandomForestClassifier(random_state=42)
+                model.fit(X, y_encoded)
+                st.session_state.model = model
 
-            predictions = st.session_state.model.predict(X)
-            data['predicted_status'] = predictions
+            predictions_encoded = st.session_state.model.predict(X)
+            data['predicted_status'] = le.inverse_transform(predictions_encoded)
 
             st.success("✅ Predictions generated successfully!")
 
@@ -145,11 +157,17 @@ elif menu == "📈 Feature Insights":
         st.warning("⚠️ Please run the 'Failure Prediction' section first to generate a model.")
     else:
         model = st.session_state.model
+        le = st.session_state.label_encoder
+        sample_X = data[sensor_cols].sample(min(200, len(data)))
+
         with st.spinner("Calculating SHAP values..."):
-            sample_X = data[sensor_cols].sample(min(200, len(data)))
-            explainer = shap.Explainer(model, sample_X)
+            explainer = shap.TreeExplainer(model, model_output="probability")
             shap_values = explainer(sample_X)
-            st.pyplot(shap.summary_plot(shap_values, sample_X, show=False))
+
+            # Use matplotlib to display SHAP summary plot in Streamlit
+            fig, ax = plt.subplots(figsize=(10,6))
+            shap.summary_plot(shap_values, sample_X, show=False, plot_type="bar", max_display=10)
+            st.pyplot(fig)
 
 # ------------------------------------------
 # 5. MAINTENANCE LOG
@@ -177,18 +195,20 @@ elif menu == "📉 Model Performance":
         st.warning("⚠️ Please run the 'Failure Prediction' section first to generate predictions.")
         st.stop()
     else:
-        y_true = data['status']
-        y_pred = data['predicted_status']
+        y_true_encoded = st.session_state.label_encoder.transform(data['status'])
+        y_pred_encoded = st.session_state.label_encoder.transform(data['predicted_status'])
 
         st.text("Classification Report:")
-        st.text(classification_report(y_true, y_pred))
+        st.text(classification_report(y_true_encoded, y_pred_encoded, target_names=st.session_state.label_encoder.classes_))
 
-        cm = confusion_matrix(y_true, y_pred)
-        fig = px.imshow(cm, text_auto=True, title="Confusion Matrix", color_continuous_scale='Blues')
+        cm = confusion_matrix(y_true_encoded, y_pred_encoded)
+        fig = px.imshow(cm, text_auto=True, title="Confusion Matrix", color_continuous_scale='Blues',
+                        labels=dict(x="Predicted", y="Actual"), x=st.session_state.label_encoder.classes_, y=st.session_state.label_encoder.classes_)
         st.plotly_chart(fig, use_container_width=True)
 
-        if len(set(y_true)) == 2:
-            fpr, tpr, _ = roc_curve(pd.factorize(y_true)[0], pd.factorize(y_pred)[0])
+        # ROC curve only works for binary classification
+        if len(st.session_state.label_encoder.classes_) == 2:
+            fpr, tpr, _ = roc_curve(y_true_encoded, y_pred_encoded)
             roc_auc = auc(fpr, tpr)
             fig_roc = go.Figure()
             fig_roc.add_trace(go.Scatter(x=fpr, y=tpr, mode='lines', name='ROC Curve'))
