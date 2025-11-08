@@ -13,7 +13,7 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import classification_report, confusion_matrix, roc_curve, auc
 import shap
-import matplotlib.pyplot as plt
+import streamlit.components.v1 as components
 
 # ------------------------------------------
 # PAGE CONFIGURATION
@@ -147,7 +147,7 @@ elif menu == "🧠 Failure Prediction":
             )
 
 # ------------------------------------------
-# 4. FEATURE INSIGHTS (SHAP VALUES)
+# 4. FEATURE INSIGHTS (SHAP VALUES) - Streamlit Cloud Compatible
 # ------------------------------------------
 elif menu == "📈 Feature Insights":
     st.subheader("Model Explainability - SHAP Insights")
@@ -164,10 +164,9 @@ elif menu == "📈 Feature Insights":
             explainer = shap.TreeExplainer(model, model_output="probability")
             shap_values = explainer(sample_X)
 
-            # Use matplotlib to display SHAP summary plot in Streamlit
-            fig, ax = plt.subplots(figsize=(10,6))
-            shap.summary_plot(shap_values, sample_X, show=False, plot_type="bar", max_display=10)
-            st.pyplot(fig)
+            # Render SHAP summary bar plot as HTML
+            shap_html = shap.plots.bar(shap_values, max_display=10, show=False)
+            components.html(shap_html.data, height=600)
 
 # ------------------------------------------
 # 5. MAINTENANCE LOG
