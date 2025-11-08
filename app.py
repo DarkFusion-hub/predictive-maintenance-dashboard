@@ -2,7 +2,7 @@
 # Predictive Maintenance Dashboard
 # Developed by: The Vanguards
 # Members: Pravin | Aiteswar | Ashwien
-# Fully Automatic Version: Correct SHAP for Multi-Class with Progress Bar
+# Fully Automatic Version: Robust SHAP for Multi-Class
 # ==========================================
 
 import streamlit as st
@@ -58,7 +58,7 @@ if uploaded_file is not None:
     data = load_data(uploaded_file)
     st.sidebar.success("✅ Data uploaded successfully!")
 
-    # Define sensor columns
+    # Sensor columns
     sensor_cols = [c for c in data.columns if c not in ['timestamp', 'status', 'predicted_status']]
 
     # ------------------------------------------
@@ -137,7 +137,7 @@ elif menu == "🧠 Failure Prediction":
     )
 
 # ------------------------------------------
-# 4. FEATURE INSIGHTS (SHAP VALUES WITH PROGRESS BAR)
+# 4. FEATURE INSIGHTS (SHAP VALUES ROBUST)
 # ------------------------------------------
 elif menu == "📈 Feature Insights":
     st.subheader("Model Explainability - SHAP Insights")
@@ -148,30 +148,13 @@ elif menu == "📈 Feature Insights":
 
     with st.spinner("Calculating SHAP values..."):
         explainer = shap.TreeExplainer(model)
-        
-        # Initialize progress bar
-        progress_bar = st.progress(0)
-        total_rows = len(sample_X)
-        shap_values_list = []
-
-        # Compute SHAP values row by row to update progress
-        for i, (_, row) in enumerate(sample_X.iterrows()):
-            shap_val = explainer.shap_values(row)
-            shap_values_list.append(shap_val)
-            progress_bar.progress((i + 1) / total_rows)
-
-        progress_bar.empty()  # remove progress bar when done
+        shap_values = explainer(sample_X)  # compute on full batch
 
         # Handle multi-class SHAP values
-        if isinstance(shap_values_list[0], list):  # multi-class
-            # Stack per class
-            class_arrays = []
-            for class_idx in range(len(shap_values_list[0])):
-                class_arrays.append(np.array([shap_val[class_idx] for shap_val in shap_values_list]))
-            # Compute mean absolute across classes
-            mean_abs_shap = np.mean([np.abs(ca).mean(axis=0) for ca in class_arrays], axis=0)
-        else:  # single-class
-            mean_abs_shap = np.abs(np.vstack(shap_values_list)).mean(axis=0)
+        if isinstance(shap_values.values, list):  # multi-class
+            mean_abs_shap = np.mean([np.abs(c).mean(axis=0) for c in shap_values.values], axis=0)
+        else:  # binary or single-output
+            mean_abs_shap = np.abs(shap_values.values).mean(axis=0)
 
         shap_summary = pd.DataFrame({
             'Feature': sample_X.columns,
