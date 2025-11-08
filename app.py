@@ -9,8 +9,6 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
-import joblib
-from datetime import datetime
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report, confusion_matrix, roc_curve, auc
 import shap
@@ -62,7 +60,7 @@ else:
     st.stop()
 
 # ✅ Define sensor columns globally (used in all sections)
-sensor_cols = [c for c in data.columns if c not in ['timestamp', 'status']]
+sensor_cols = [c for c in data.columns if c not in ['timestamp', 'status', 'predicted_status']]
 
 # ------------------------------------------
 # 1. DASHBOARD OVERVIEW
@@ -115,11 +113,12 @@ elif menu == "🧠 Failure Prediction":
             X = data[sensor_cols]
             y = data['status']
 
-            # Dummy model for demo (replace with actual trained model)
-            model = RandomForestClassifier(random_state=42)
-            model.fit(X, y)
+            # Train model if not already in session_state
+            if 'model' not in st.session_state:
+                st.session_state.model = RandomForestClassifier(random_state=42)
+                st.session_state.model.fit(X, y)
 
-            predictions = model.predict(X)
+            predictions = st.session_state.model.predict(X)
             data['predicted_status'] = predictions
 
             st.success("✅ Predictions generated successfully!")
@@ -128,8 +127,12 @@ elif menu == "🧠 Failure Prediction":
             fig = px.histogram(data, x='predicted_status', title="Predicted Equipment Status")
             st.plotly_chart(fig, use_container_width=True)
 
-            st.download_button("Download Prediction Results", data.to_csv(index=False).encode('utf-8'),
-                               "predictions.csv", "text/csv")
+            st.download_button(
+                "Download Prediction Results",
+                data.to_csv(index=False).encode('utf-8'),
+                "predictions.csv",
+                "text/csv"
+            )
 
 # ------------------------------------------
 # 4. FEATURE INSIGHTS (SHAP VALUES)
@@ -138,9 +141,10 @@ elif menu == "📈 Feature Insights":
     st.subheader("Model Explainability - SHAP Insights")
     st.info("This section shows which features (sensors) most influence failure predictions.")
 
-    if 'model' not in locals():
+    if 'model' not in st.session_state:
         st.warning("⚠️ Please run the 'Failure Prediction' section first to generate a model.")
     else:
+        model = st.session_state.model
         with st.spinner("Calculating SHAP values..."):
             sample_X = data[sensor_cols].sample(min(200, len(data)))
             explainer = shap.Explainer(model, sample_X)
@@ -189,9 +193,11 @@ elif menu == "📉 Model Performance":
             fig_roc = go.Figure()
             fig_roc.add_trace(go.Scatter(x=fpr, y=tpr, mode='lines', name='ROC Curve'))
             fig_roc.add_trace(go.Scatter(x=[0, 1], y=[0, 1], mode='lines', name='Baseline', line=dict(dash='dash')))
-            fig_roc.update_layout(title=f"ROC Curve (AUC = {roc_auc:.2f})", 
-                                  xaxis_title='False Positive Rate', 
-                                  yaxis_title='True Positive Rate')
+            fig_roc.update_layout(
+                title=f"ROC Curve (AUC = {roc_auc:.2f})",
+                xaxis_title='False Positive Rate',
+                yaxis_title='True Positive Rate'
+            )
             st.plotly_chart(fig_roc, use_container_width=True)
 
 # ------------------------------------------
