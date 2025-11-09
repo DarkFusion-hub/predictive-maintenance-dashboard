@@ -1,8 +1,6 @@
 # ==========================================
-# Predictive Maintenance Dashboard
+# Predictive Maintenance Dashboard - Advanced
 # Developed by: The Vanguards
-# Members: Pravin | Aiteswar | Ashwien
-# Fully Automatic Version: Robust SHAP for Multi-Class
 # ==========================================
 
 import streamlit as st
@@ -15,203 +13,259 @@ from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import classification_report, confusion_matrix, roc_curve, auc
 import shap
 
-# ------------------------------------------
+# ------------------------------
 # PAGE CONFIGURATION
-# ------------------------------------------
+# ------------------------------
 st.set_page_config(
     page_title="Predictive Maintenance Dashboard",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="expanded"
 )
 
-st.title("🔧 Predictive Maintenance Dashboard for Industrial Equipment")
-st.markdown("### A data-driven approach to anticipate failures and optimize maintenance")
+st.title("🔧 Predictive Maintenance Dashboard")
+st.markdown("*Data-driven insights to prevent failures, optimize maintenance, and improve operational efficiency*")
 
-# ------------------------------------------
-# SIDEBAR NAVIGATION
-# ------------------------------------------
-menu = st.sidebar.radio(
-    "Navigate",
-    [
-        "🏠 Dashboard Overview",
-        "📊 Sensor Data Visualization",
-        "🧠 Failure Prediction",
-        "📈 Feature Insights",
-        "🛠️ Maintenance Log",
-        "📉 Model Performance"
-    ]
-)
-
-# ------------------------------------------
-# LOAD / UPLOAD DATA SECTION
-# ------------------------------------------
+# ------------------------------
+# UPLOAD / LOAD DATA
+# ------------------------------
 @st.cache_data
 def load_data(uploaded_file):
     df = pd.read_csv(uploaded_file)
-    df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
+
+    # Handle timestamp
+    if 'timestamp' in df.columns:
+        df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
+    elif 'DateTime' in df.columns:
+        df.rename(columns={'DateTime': 'timestamp'}, inplace=True)
+        df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
+    elif 'time' in df.columns:
+        df.rename(columns={'time': 'timestamp'}, inplace=True)
+        df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
+    else:
+        st.warning("⚠ No timestamp column found. Using default sequence index as timestamp.")
+        df['timestamp'] = pd.date_range(start='2025-01-01', periods=len(df), freq='H')
     return df
 
 st.sidebar.header("📂 Upload Sensor Data")
 uploaded_file = st.sidebar.file_uploader("Upload CSV File", type=['csv'])
 
-if uploaded_file is not None:
+if uploaded_file:
     data = load_data(uploaded_file)
     st.sidebar.success("✅ Data uploaded successfully!")
-
-    # Sensor columns
     sensor_cols = [c for c in data.columns if c not in ['timestamp', 'status', 'predicted_status']]
 
-    # ------------------------------------------
-    # AUTOMATIC MODEL TRAINING AND PREDICTION
-    # ------------------------------------------
+    # ------------------------------
+    # TRAIN MODEL
+    # ------------------------------
     if 'status' in data.columns and sensor_cols:
-        X = data[sensor_cols]
+        X = data[sensor_cols].copy()
         y = data['status']
 
-        # Encode status labels
+        # Encode categorical sensor columns automatically
+        for col in X.select_dtypes(include='object').columns:
+            le_col = LabelEncoder()
+            X[col] = le_col.fit_transform(X[col])
+
+        # Encode target variable
         le = LabelEncoder()
         y_encoded = le.fit_transform(y)
         st.session_state.label_encoder = le
 
-        # Train RandomForest
+        # Train RandomForestClassifier
         model = RandomForestClassifier(random_state=42)
         model.fit(X, y_encoded)
         st.session_state.model = model
 
-        # Predict
-        predictions_encoded = model.predict(X)
-        data['predicted_status'] = le.inverse_transform(predictions_encoded)
+        pred_encoded = model.predict(X)
+        data['predicted_status'] = le.inverse_transform(pred_encoded)
 
+        # Define risk levels
+        data['risk_level'] = np.where(data['predicted_status'] == 'Critical', 'High',
+                                      np.where(data['predicted_status'] == 'Warning', 'Medium', 'Low'))
 else:
     st.sidebar.warning("Please upload a dataset to continue.")
     st.stop()
 
-# ------------------------------------------
+# ------------------------------
+# TABS NAVIGATION
+# ------------------------------
+tabs = st.tabs([
+    "🏠 Overview",
+    "📊 Sensor Trends",
+    "🧠 Failure Prediction",
+    "📈 SHAP Insights",
+    "⚡ What-If Scenarios",
+    "💡 Recommendations",
+    "📜 Outcome & Conclusion",
+    "🛠 Maintenance Log",
+    "📉 Model Performance"
+])
+
+# ------------------------------
 # 1. DASHBOARD OVERVIEW
-# ------------------------------------------
-if menu == "🏠 Dashboard Overview":
-    st.subheader("System Summary")
+# ------------------------------
+with tabs[0]:
+    st.subheader("System Overview")
     col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Total Records", len(data))
-    with col2:
-        st.metric("Number of Sensors", len(sensor_cols))
-    with col3:
-        st.metric("Time Range", f"{data['timestamp'].min().date()} → {data['timestamp'].max().date()}")
+    col1.metric("Total Records", len(data))
+    col2.metric("Number of Sensors", len(sensor_cols))
+    col3.metric("Time Range", f"{data['timestamp'].min().date()} → {data['timestamp'].max().date()}")
 
-    st.markdown("### Equipment Health Summary")
+    st.markdown("### Equipment Health Distribution")
     if 'status' in data.columns:
-        fig = px.pie(data, names='status', title="Current Equipment Status Distribution")
-        st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.info("No 'status' column found — please include a status label (e.g., Normal/Warning/Critical).")
-
-# ------------------------------------------
-# 2. SENSOR DATA VISUALIZATION
-# ------------------------------------------
-elif menu == "📊 Sensor Data Visualization":
-    st.subheader("Sensor Trend Analysis")
-    if sensor_cols:
-        selected_sensor = st.selectbox("Select Sensor", sensor_cols)
-        fig = px.line(data, x='timestamp', y=selected_sensor, title=f"{selected_sensor} Over Time")
+        fig = px.pie(data, names='status', title="Current Equipment Status", hole=0.3)
         st.plotly_chart(fig, use_container_width=True)
 
-        st.markdown("#### Correlation Heatmap")
-        st.write(px.imshow(data[sensor_cols].corr(), color_continuous_scale='Blues'))
-    else:
-        st.warning("⚠️ No numeric sensor columns detected.")
-
-# ------------------------------------------
-# 3. FAILURE PREDICTION (AUTOMATIC)
-# ------------------------------------------
-elif menu == "🧠 Failure Prediction":
-    st.subheader("Predicted Equipment Health Status")
-    st.success("✅ Predictions generated automatically upon CSV upload!")
-    fig = px.histogram(data, x='predicted_status', title="Predicted Equipment Status")
-    st.plotly_chart(fig, use_container_width=True)
-    st.download_button(
-        "Download Prediction Results",
-        data.to_csv(index=False).encode('utf-8'),
-        "predictions.csv",
-        "text/csv"
-    )
-
-# ------------------------------------------
-# 4. FEATURE INSIGHTS (SHAP VALUES ROBUST)
-# ------------------------------------------
-elif menu == "📈 Feature Insights":
-    st.subheader("Model Explainability - SHAP Insights")
-    st.info("This section shows which features (sensors) most influence failure predictions.")
-
-    model = st.session_state.model
-    sample_X = data[sensor_cols].sample(min(200, len(data)))
-
-    with st.spinner("Calculating SHAP values..."):
-        explainer = shap.TreeExplainer(model)
-        shap_values = explainer(sample_X)  # compute on full batch
-
-        # Handle multi-class SHAP values
-        if isinstance(shap_values.values, list):  # multi-class
-            mean_abs_shap = np.mean([np.abs(c).mean(axis=0) for c in shap_values.values], axis=0)
-        else:  # binary or single-output
-            mean_abs_shap = np.abs(shap_values.values).mean(axis=0)
-
-        shap_summary = pd.DataFrame({
-            'Feature': sample_X.columns,
-            'Mean |SHAP value|': mean_abs_shap
-        }).sort_values(by='Mean |SHAP value|', ascending=False)
-
-        st.markdown("### Feature Importance Based on SHAP Values")
-        st.dataframe(shap_summary)
-
-        # Plotly bar chart
-        fig = px.bar(shap_summary, x='Feature', y='Mean |SHAP value|', title="SHAP Feature Importance")
+# ------------------------------
+# 2. SENSOR TRENDS
+# ------------------------------
+with tabs[1]:
+    st.subheader("Interactive Sensor Trends")
+    sensors_selected = st.multiselect("Select Sensors", sensor_cols, default=sensor_cols[:2])
+    if sensors_selected:
+        fig = px.line(data, x='timestamp', y=sensors_selected, title="Sensor Readings Over Time")
+        fig.update_layout(xaxis_rangeslider_visible=True)
         st.plotly_chart(fig, use_container_width=True)
 
-# ------------------------------------------
-# 5. MAINTENANCE LOG
-# ------------------------------------------
-elif menu == "🛠️ Maintenance Log":
-    st.subheader("Maintenance Alerts and Actions")
+        # Correlation heatmap
+        corr = data[sensors_selected].corr()
+        st.markdown("#### Sensor Correlation Heatmap")
+        st.write(px.imshow(corr, color_continuous_scale='Blues'))
+
+# ------------------------------
+# 3. FAILURE PREDICTION
+# ------------------------------
+with tabs[2]:
+    st.subheader("Failure Prediction & Risk Alerts")
+    if 'predicted_status' in data.columns:
+        fig = px.histogram(data, x='predicted_status', color='risk_level',
+                           title="Predicted Equipment Health",
+                           barmode='group',
+                           color_discrete_map={'High':'red','Medium':'orange','Low':'green'})
+        st.plotly_chart(fig, use_container_width=True)
+
+        st.markdown("#### High-Risk Equipment")
+        high_risk = data[data['risk_level'] == 'High']
+        if not high_risk.empty:
+            st.dataframe(high_risk[['timestamp','predicted_status','risk_level']])
+        else:
+            st.info("No high-risk equipment detected currently.")
+
+        st.download_button("Download Predictions", data.to_csv(index=False).encode('utf-8'), "predictions.csv", "text/csv")
+
+# ------------------------------
+# 4. FEATURE INSIGHTS (SHAP)
+# ------------------------------
+with tabs[3]:
+    st.subheader("Feature Importance - SHAP Values")
+    if 'model' in st.session_state and sensor_cols:
+        model = st.session_state.model
+        sample_X = data[sensor_cols].sample(min(200,len(data)))
+        with st.spinner("Calculating SHAP values..."):
+            explainer = shap.TreeExplainer(model)
+            shap_values = explainer(sample_X)
+            shap_vals = shap_values.values
+            if shap_vals.ndim == 2:
+                mean_abs_shap = np.abs(shap_vals).mean(axis=0)
+            elif shap_vals.ndim == 3:
+                mean_abs_shap = np.abs(shap_vals).mean(axis=(0,2))
+            shap_summary = pd.DataFrame({'Feature': sample_X.columns, 'Mean |SHAP|': mean_abs_shap}).sort_values(by='Mean |SHAP|', ascending=False)
+            st.dataframe(shap_summary)
+            fig = px.bar(shap_summary, x='Feature', y='Mean |SHAP|', title="Feature Importance")
+            st.plotly_chart(fig, use_container_width=True)
+
+# ------------------------------
+# 5. WHAT-IF SCENARIOS
+# ------------------------------
+with tabs[4]:
+    st.subheader("What-If Scenarios")
+    st.info("Simulate changes in sensor readings to see potential impact on predicted status.")
+    scenario_sensor = st.selectbox("Select Sensor to Modify", sensor_cols)
+    scenario_value = st.slider(f"Adjust {scenario_sensor} Value", float(data[scenario_sensor].min()), float(data[scenario_sensor].max()), float(data[scenario_sensor].mean()))
+    
+    scenario_X = X.copy()
+    scenario_X[scenario_sensor] = scenario_value
+    scenario_pred = st.session_state.model.predict(scenario_X)
+    scenario_status = st.session_state.label_encoder.inverse_transform(scenario_pred)
+    
+    st.markdown(f"*Predicted Status after adjusting {scenario_sensor} = {scenario_value}:*")
+    st.write(pd.Series(scenario_status).value_counts())
+
+# ------------------------------
+# 6. RECOMMENDATIONS
+# ------------------------------
+with tabs[5]:
+    st.subheader("Solutions / Recommendations")
     st.markdown("""
-    | Date | Machine | Alert Level | Recommended Action |
-    |-------|----------|-------------|--------------------|
-    | 2025-11-01 | Motor #2 | ⚠️ Warning | Schedule inspection for vibration anomaly |
-    | 2025-11-03 | Pump #1 | 🔴 Critical | Immediate shutdown recommended |
-    | 2025-11-05 | Bearing #4 | 🟢 Normal | No action required |
+    - *High-risk equipment:* Schedule immediate inspection or preventive maintenance.
+    - *Medium-risk equipment:* Monitor sensor trends closely and prepare contingency.
+    - *Low-risk equipment:* Maintain normal operation and routine checks.
+    - *Feature insights:* Focus maintenance on components with highest SHAP values.
+    - *Trend analysis:* Adjust operational parameters that contribute to high vibration, temperature, or power usage.
     """)
-    st.download_button("Download Maintenance Log", "Sample maintenance log.", "maintenance_log.txt")
 
-# ------------------------------------------
-# 6. MODEL PERFORMANCE
-# ------------------------------------------
-elif menu == "📉 Model Performance":
+# ------------------------------
+# 7. OUTCOME & CONCLUSION
+# ------------------------------
+with tabs[6]:
+    st.subheader("Objective & Outcome")
+    st.markdown("""
+    *Objective:* Develop a predictive maintenance system to reduce failures and optimize operations.
+    
+    *Key Achievements:*
+    - Built interactive dashboards for real-time/historical sensor analysis.
+    - Developed ML-based predictions for equipment health.
+    - Identified high-risk components and actionable insights.
+    - SHAP analysis explained key contributing factors to failures.
+    - What-if scenarios allow proactive maintenance planning.
+    
+    *Potential Impact:*
+    - Minimized unexpected downtime.
+    - Reduced maintenance costs.
+    - Improved overall operational efficiency and safety.
+    """)
+
+# ------------------------------
+# 8. MAINTENANCE LOG
+# ------------------------------
+with tabs[7]:
+    st.subheader("Maintenance Log")
+    log = pd.DataFrame({
+        'Date':['2025-11-01','2025-11-03','2025-11-05'],
+        'Machine':['Motor #2','Pump #1','Bearing #4'],
+        'Alert':['⚠ Warning','🔴 Critical','🟢 Normal'],
+        'Action':['Schedule inspection','Immediate shutdown','No action required']
+    })
+    st.dataframe(log)
+    st.download_button("Download Log", log.to_csv(index=False).encode('utf-8'), "maintenance_log.csv")
+
+# ------------------------------
+# 9. MODEL PERFORMANCE
+# ------------------------------
+with tabs[8]:
     st.subheader("Model Evaluation Metrics")
-    y_true_encoded = st.session_state.label_encoder.transform(data['status'])
-    y_pred_encoded = st.session_state.label_encoder.transform(data['predicted_status'])
+    if 'predicted_status' in data.columns:
+        y_true = st.session_state.label_encoder.transform(data['status'])
+        y_pred = st.session_state.label_encoder.transform(data['predicted_status'])
 
-    st.text("Classification Report:")
-    st.text(classification_report(y_true_encoded, y_pred_encoded, target_names=st.session_state.label_encoder.classes_))
+        st.text(classification_report(y_true, y_pred, target_names=st.session_state.label_encoder.classes_))
 
-    cm = confusion_matrix(y_true_encoded, y_pred_encoded)
-    fig = px.imshow(cm, text_auto=True, title="Confusion Matrix", color_continuous_scale='Blues',
-                    labels=dict(x="Predicted", y="Actual"),
-                    x=st.session_state.label_encoder.classes_,
-                    y=st.session_state.label_encoder.classes_)
-    st.plotly_chart(fig, use_container_width=True)
+        cm = confusion_matrix(y_true, y_pred)
+        fig = px.imshow(cm, text_auto=True, title="Confusion Matrix",
+                        labels=dict(x="Predicted", y="Actual"),
+                        x=st.session_state.label_encoder.classes_,
+                        y=st.session_state.label_encoder.classes_,
+                        color_continuous_scale='Blues')
+        st.plotly_chart(fig, use_container_width=True)
 
-    if len(st.session_state.label_encoder.classes_) == 2:
-        fpr, tpr, _ = roc_curve(y_true_encoded, y_pred_encoded)
-        roc_auc = auc(fpr, tpr)
-        fig_roc = go.Figure()
-        fig_roc.add_trace(go.Scatter(x=fpr, y=tpr, mode='lines', name='ROC Curve'))
-        fig_roc.add_trace(go.Scatter(x=[0, 1], y=[0, 1], mode='lines', name='Baseline', line=dict(dash='dash')))
-        fig_roc.update_layout(title=f"ROC Curve (AUC = {roc_auc:.2f})",
-                              xaxis_title='False Positive Rate', yaxis_title='True Positive Rate')
-        st.plotly_chart(fig_roc, use_container_width=True)
+        # Binary ROC curve
+        if len(st.session_state.label_encoder.classes_) == 2:
+            fpr, tpr, _ = roc_curve(y_true, y_pred)
+            roc_auc = auc(fpr, tpr)
+            fig_roc = go.Figure()
+            fig_roc.add_trace(go.Scatter(x=fpr, y=tpr, mode='lines', name='ROC Curve'))
+            fig_roc.add_trace(go.Scatter(x=[0,1], y=[0,1], mode='lines', name='Baseline', line=dict(dash='dash')))
+            fig_roc.update_layout(title=f"ROC Curve (AUC={roc_auc:.2f})", xaxis_title="FPR", yaxis_title="TPR")
+            st.plotly_chart(fig_roc, use_container_width=True)
 
-# ------------------------------------------
-# END
-# ------------------------------------------
-st.sidebar.markdown("---")
-st.sidebar.info("Developed by **The Vanguards** | Streamlit Predictive Maintenance Project")
+st.sidebar.info("Developed by The Vanguards | Streamlit Predictive Maintenance Project")
