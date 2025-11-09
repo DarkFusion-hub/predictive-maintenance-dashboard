@@ -1,5 +1,5 @@
 # ==========================================
-# Predictive Maintenance Dashboard - Advanced
+# Predictive Maintenance Dashboard - Robust
 # Developed by: The Vanguards
 # ==========================================
 
@@ -26,7 +26,7 @@ st.title("🔧 Predictive Maintenance Dashboard")
 st.markdown("*Data-driven insights to prevent failures, optimize maintenance, and improve operational efficiency*")
 
 # ------------------------------
-# UPLOAD / LOAD DATA
+# LOAD / UPLOAD DATA
 # ------------------------------
 @st.cache_data
 def load_data(uploaded_file):
@@ -61,15 +61,20 @@ if uploaded_file:
         X = data[sensor_cols].copy()
         y = data['status']
 
-        # Encode categorical sensor columns automatically
-        for col in X.select_dtypes(include='object').columns:
+        # Encode categorical sensor columns
+        categorical_cols = X.select_dtypes(include='object').columns.tolist()
+        encoders = {}
+        for col in categorical_cols:
             le_col = LabelEncoder()
             X[col] = le_col.fit_transform(X[col])
+            encoders[col] = le_col  # Save encoder for future use
 
         # Encode target variable
-        le = LabelEncoder()
-        y_encoded = le.fit_transform(y)
-        st.session_state.label_encoder = le
+        le_target = LabelEncoder()
+        y_encoded = le_target.fit_transform(y)
+        st.session_state.label_encoder = le_target
+        st.session_state.encoders = encoders
+        st.session_state.X = X.copy()  # save numeric X for later use
 
         # Train RandomForestClassifier
         model = RandomForestClassifier(random_state=42)
@@ -77,7 +82,7 @@ if uploaded_file:
         st.session_state.model = model
 
         pred_encoded = model.predict(X)
-        data['predicted_status'] = le.inverse_transform(pred_encoded)
+        data['predicted_status'] = le_target.inverse_transform(pred_encoded)
 
         # Define risk levels
         data['risk_level'] = np.where(data['predicted_status'] == 'Critical', 'High',
@@ -127,7 +132,6 @@ with tabs[1]:
         fig.update_layout(xaxis_rangeslider_visible=True)
         st.plotly_chart(fig, use_container_width=True)
 
-        # Correlation heatmap
         corr = data[sensors_selected].corr()
         st.markdown("#### Sensor Correlation Heatmap")
         st.write(px.imshow(corr, color_continuous_scale='Blues'))
@@ -160,16 +164,24 @@ with tabs[3]:
     st.subheader("Feature Importance - SHAP Values")
     if 'model' in st.session_state and sensor_cols:
         model = st.session_state.model
-        sample_X = data[sensor_cols].sample(min(200,len(data)))
+        X_numeric = st.session_state.X.copy()  # already encoded numeric data
+        sample_X = X_numeric.sample(min(200,len(X_numeric)))
+
         with st.spinner("Calculating SHAP values..."):
             explainer = shap.TreeExplainer(model)
             shap_values = explainer(sample_X)
             shap_vals = shap_values.values
+
             if shap_vals.ndim == 2:
                 mean_abs_shap = np.abs(shap_vals).mean(axis=0)
             elif shap_vals.ndim == 3:
                 mean_abs_shap = np.abs(shap_vals).mean(axis=(0,2))
-            shap_summary = pd.DataFrame({'Feature': sample_X.columns, 'Mean |SHAP|': mean_abs_shap}).sort_values(by='Mean |SHAP|', ascending=False)
+
+            shap_summary = pd.DataFrame({
+                'Feature': sample_X.columns,
+                'Mean |SHAP|': mean_abs_shap
+            }).sort_values(by='Mean |SHAP|', ascending=False)
+
             st.dataframe(shap_summary)
             fig = px.bar(shap_summary, x='Feature', y='Mean |SHAP|', title="Feature Importance")
             st.plotly_chart(fig, use_container_width=True)
@@ -180,14 +192,18 @@ with tabs[3]:
 with tabs[4]:
     st.subheader("What-If Scenarios")
     st.info("Simulate changes in sensor readings to see potential impact on predicted status.")
+
     scenario_sensor = st.selectbox("Select Sensor to Modify", sensor_cols)
-    scenario_value = st.slider(f"Adjust {scenario_sensor} Value", float(data[scenario_sensor].min()), float(data[scenario_sensor].max()), float(data[scenario_sensor].mean()))
-    
-    scenario_X = X.copy()
+    scenario_value = st.slider(f"Adjust {scenario_sensor} Value",
+                               float(data[scenario_sensor].min()),
+                               float(data[scenario_sensor].max()),
+                               float(data[scenario_sensor].mean()))
+
+    # Use numeric encoded X
+    scenario_X = st.session_state.X.copy()
     scenario_X[scenario_sensor] = scenario_value
     scenario_pred = st.session_state.model.predict(scenario_X)
     scenario_status = st.session_state.label_encoder.inverse_transform(scenario_pred)
-    
     st.markdown(f"*Predicted Status after adjusting {scenario_sensor} = {scenario_value}:*")
     st.write(pd.Series(scenario_status).value_counts())
 
@@ -213,8 +229,8 @@ with tabs[6]:
     *Objective:* Develop a predictive maintenance system to reduce failures and optimize operations.
     
     *Key Achievements:*
-    - Built interactive dashboards for real-time/historical sensor analysis.
-    - Developed ML-based predictions for equipment health.
+    - Interactive dashboards for real-time/historical sensor analysis.
+    - ML-based predictions for equipment health.
     - Identified high-risk components and actionable insights.
     - SHAP analysis explained key contributing factors to failures.
     - What-if scenarios allow proactive maintenance planning.
@@ -248,13 +264,16 @@ with tabs[8]:
         y_true = st.session_state.label_encoder.transform(data['status'])
         y_pred = st.session_state.label_encoder.transform(data['predicted_status'])
 
-        st.text(classification_report(y_true, y_pred, target_names=st.session_state.label_encoder.classes_))
+        # Fix: convert classes_ to string to avoid TypeError
+        target_names_str = [str(c) for c in st.session_state.label_encoder.classes_]
+
+        st.text(classification_report(y_true, y_pred, target_names=target_names_str))
 
         cm = confusion_matrix(y_true, y_pred)
         fig = px.imshow(cm, text_auto=True, title="Confusion Matrix",
                         labels=dict(x="Predicted", y="Actual"),
-                        x=st.session_state.label_encoder.classes_,
-                        y=st.session_state.label_encoder.classes_,
+                        x=target_names_str,
+                        y=target_names_str,
                         color_continuous_scale='Blues')
         st.plotly_chart(fig, use_container_width=True)
 
